@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Autumn-27/artex/db"
 	actool "github.com/Autumn-27/norma/tool"
@@ -17,6 +18,34 @@ var FindingTrafficBindingEnabled func() bool
 
 func findingTrafficBindingEnabled() bool {
 	return FindingTrafficBindingEnabled != nil && FindingTrafficBindingEnabled()
+}
+
+// EvidenceGateEnabled is injected by the host (DB setting evidence_gate_strict).
+// When on, report_finding refuses an HTTP-class finding with no real captured
+// traffic bound — see the gate in ToolSet.addFinding.
+var EvidenceGateEnabled func() bool
+
+func evidenceGateEnabled() bool {
+	return EvidenceGateEnabled != nil && EvidenceGateEnabled()
+}
+
+// nonHTTPVulnClass reports whether a vulnclass is clearly a non-HTTP class (TCP
+// services, infra, etc.) for which captured HTTP traffic is not expected. The
+// evidence gate exempts these; web vulns and unknown classes must cite real
+// captured HTTP traffic when the gate is on.
+func nonHTTPVulnClass(vc string) bool {
+	s := strings.ToLower(vc)
+	for _, k := range []string{
+		"tcp", "udp", "ssh", "ftp", "smb", "smtp", "dns", "ldap", "rdp", "snmp",
+		"telnet", "mysql", "redis", "mongo", "postgres", "mssql", "kafka",
+		"port scan", "service", "network", "binary", "firmware", "hardware",
+		"physical", "wifi", "wireless", "bluetooth", "serial",
+	} {
+		if strings.Contains(s, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // Applied after ToolResolve: user descriptions and prompts remain intact, while

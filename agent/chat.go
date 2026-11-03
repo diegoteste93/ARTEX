@@ -133,7 +133,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
 		EnableWebFetch:  true, // routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates
-		WebFetchProxy:   c.proxyAddr,
+		WebFetchProxy:   webFetchProxyURL(c.proxyAddr),
 		WebFetchCACert:  c.proxyCACert,
 		// Web search (optional). ddgs needs no key; brave-free needs BraveKey; tavily needs TavilyKey.
 		// WebSearchProxy is a dedicated egress proxy (http/https/socks5), unrelated to the traffic-recording MITM proxy; empty = direct.

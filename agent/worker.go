@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -202,6 +203,20 @@ func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = ad
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 
+// webFetchProxyURL normalizes the recording-proxy address for WebFetch. WebFetch
+// parses its proxy with Go's url.Parse, which needs a scheme: a bare "host:port"
+// (what traffic.ProxyAddr returns) fails to parse, so tr.Proxy stays nil and
+// WebFetch requests go DIRECT — never captured by the recorder, so the worker can
+// never cite a real traffic_id and every HTTP finding is blocked by the evidence
+// gate. curl tolerates a bare HTTP_PROXY, but Go does not. Empty stays empty (direct).
+func webFetchProxyURL(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" || strings.Contains(addr, "://") {
+		return addr
+	}
+	return "http://" + addr
+}
+
 // proxyEnv builds the Bash-subprocess env that routes child-command HTTP through
 // the egress proxy (the recording MITM when capture is on, or the global proxy
 // directly when it is off) and, only when a MITM CA is present, makes the common
@@ -230,8 +245,50 @@ func proxyEnv(proxyAddr, caCert string) []string {
 			"GIT_SSL_CAINFO="+caCert,
 			"NODE_EXTRA_CA_CERTS="+caCert,
 		)
+		// On Windows the common curl (Git/System32) is Schannel-backed: it validates
+		// the trusted MITM CA fine, but then runs a revocation check the local CA
+		// cannot answer (no CRL/OCSP) → CRYPT_E_NO_REVOCATION_CHECK → curl exits 000
+		// SILENTLY, so every HTTPS probe through the recorder fails and nothing is
+		// captured. Point curl at a PRIVATE _curlrc that sets ssl-no-revoke, scoped
+		// to the worker shells only via CURL_HOME (read only by curl processes we
+		// spawn). This skips only the impossible revocation sub-check — the CA's
+		// identity is still fully validated. No global config, no system trust change.
+		if runtime.GOOS == "windows" {
+			if home := ensureCurlHome(caCert); home != "" {
+				env = append(env, "CURL_HOME="+home)
+			}
+		}
 	}
 	return env
+}
+
+// ensureCurlHome writes a private _curlrc (containing ssl-no-revoke) next to the
+// traffic data and returns its directory, for use as CURL_HOME in worker shells.
+// Idempotent and cheap (rewrites only when the content drifts). Returns "" on any
+// failure so the caller simply omits CURL_HOME. Derived from the CA path so it
+// lands under <data>/traffic/_curlhome regardless of the configured data dir.
+func ensureCurlHome(caCert string) string {
+	dir := filepath.Join(filepath.Dir(filepath.Dir(caCert)), "_curlhome")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	const content = "ssl-no-revoke\n"
+	// curl's CURL_HOME discovery uses ".curlrc" in modern builds and "_curlrc" in
+	// older/Windows ones — write both so the option applies regardless of version.
+	wrote := false
+	for _, name := range []string{".curlrc", "_curlrc"} {
+		rc := filepath.Join(dir, name)
+		if b, err := os.ReadFile(rc); err != nil || string(b) != content {
+			if err := os.WriteFile(rc, []byte(content), 0o644); err != nil {
+				continue
+			}
+		}
+		wrote = true
+	}
+	if !wrote {
+		return ""
+	}
+	return dir
 }
 
 // workerDefaultTmpl is the built-in EDITABLE body (section [A]) of the worker
@@ -490,7 +547,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		// curl; loading the proxy CA lets MITM-re-signed HTTPS certs [verify normally]
 		// (rather than disabling verification). Direct when proxy is empty.
 		EnableWebFetch: true,
-		WebFetchProxy:  w.proxyAddr,
+		WebFetchProxy:  webFetchProxyURL(w.proxyAddr),
 		WebFetchCACert: w.proxyCACert,
 		// Web search (optional). ddgs needs no key; brave-free needs BraveKey; tavily needs TavilyKey.
 		// WebSearchProxy is a dedicated egress proxy (http/https/socks5), unrelated to the traffic-recording MITM proxy; empty = direct.

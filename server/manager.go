@@ -273,6 +273,11 @@ type Manager struct {
 const (
 	settingTrafficCapture      = "traffic_capture"
 	settingAgentTrafficBinding = "agent_traffic_binding"
+	// settingEvidenceGateStrict, when true (default), makes report_finding reject an
+	// HTTP-class finding that cites no real captured traffic — the anti-hallucination
+	// gate: a local model cannot invent a valid traffic_id, so a finding it never
+	// actually executed cannot be registered. Non-HTTP classes (TCP/service) are exempt.
+	settingEvidenceGateStrict = "evidence_gate_strict"
 	settingWebSearchOn         = "web_search_enabled"
 	settingWebSearchBackend    = "web_search_backend"
 	settingBraveKey            = "brave_search_api_key"
