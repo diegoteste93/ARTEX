@@ -223,6 +223,7 @@ func seedPrompts(pg *db.DB) {
 // and default params get injected. MCP/skill/host tools have no row and pass through.
 func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 	agent.FindingTrafficBindingEnabled = func() bool { return pg.GetBool(settingAgentTrafficBinding, false) }
+	agent.EvidenceGateEnabled = func() bool { return pg.GetBool(settingEvidenceGateStrict, true) }
 	// Seed the built-in domain tools (first-insert only; DO NOTHING preserves edits).
 	// No startup prune: rows we didn't seed are left alone so future user-defined
 	// custom tools (system=false, added via the UI) survive restarts.

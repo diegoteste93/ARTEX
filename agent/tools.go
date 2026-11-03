@@ -1380,6 +1380,17 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 		if err != nil {
 			return actool.Errorf(err.Error()), nil
 		}
+		// Evidence gate (anti-hallucination): with strict mode + traffic binding on,
+		// an HTTP-class finding MUST cite at least one real captured exchange. A local
+		// model can fabricate a plausible PoC but cannot invent a traffic_id that
+		// resolves in the capture store, so a vuln it never actually executed cannot be
+		// registered. Non-HTTP classes (TCP/service/infra) are exempt. The finding is
+		// NOT recorded here — the model is told to re-run the probe through the recorder
+		// and cite the real traffic_id. (Fabricated IDs that ARE provided still fail at
+		// Record below when they do not resolve.)
+		if evidenceGateEnabled() && findingTrafficBindingEnabled() && len(refs) == 0 && !nonHTTPVulnClass(a.VulnClass) {
+			return actool.Errorf("EVIDENCE REQUIRED — finding NOT registered. Strict evidence mode is on: an HTTP finding must cite at least one REAL captured request/response as proof. Steps: (1) re-run the exact exploit request — your curl/http already routes through the recording proxy, so a real request is captured automatically; (2) call traffic_search on the target host to get the real traffic_id; (3) verify it with traffic_get; (4) call report_finding again with traffic_refs:[{\"traffic_id\":\"<real id>\",\"role\":\"proof\"}]. Do NOT invent traffic IDs. If this is genuinely a non-HTTP finding (TCP/service/infrastructure), say so in vulnclass and it is exempt."), nil
+		}
 		input := db.RecordFindingInput{TaskID: t.taskID, ExplorationID: t.ts.ID(), IntentID: pid(a.IntentID), VulnClass: a.VulnClass, Name: a.Name, Severity: a.Severity, Summary: a.Summary, Evidence: a.Evidence, Worker: t.worker, AssetIDs: pidList(a.AssetIDs)}
 		var recorded *db.RecordedFinding
 		if t.findingRecorder != nil {
